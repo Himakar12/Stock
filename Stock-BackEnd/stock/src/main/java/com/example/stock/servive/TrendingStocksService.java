@@ -62,7 +62,15 @@ public class TrendingStocksService {
             } catch (Exception e) {
                 log.warn("52-week range refresh failed for {}: {}", ticker, e.getMessage());
             }
-            thesisCache.putIfAbsent(ticker, fallbackThesis(ticker));
+            try {
+                String systemPrompt = "Respond in pure JSON only: {\"sentiment\":\"BULLISH|BEARISH|NEUTRAL\",\"confidence\":50,\"executiveSummary\":\"...\",\"bullCase\":[\"...\"],\"bearCase\":[\"...\"],\"keyRisk\":\"...\",\"catalyst\":\"...\"}";
+                String raw = openRouterService.callAiWithPrompt(systemPrompt,
+                        "Give a concise current equity thesis for " + ticker + ".");
+                thesisCache.put(ticker, parseThesis(raw));
+            } catch (Exception e) {
+                log.warn("Trending thesis refresh failed for {}: {}", ticker, e.getMessage());
+                thesisCache.put(ticker, fallbackThesis(ticker));
+            }
         }
     }
 
@@ -86,6 +94,23 @@ public class TrendingStocksService {
     private List<String> configuredTickers() {
         return watchlistService.getStocks(DEFAULT_USER_ID).stream()
                 .map(item -> item.getYahooSymbol()).limit(5).toList();
+    }
+
+    private ThesisSnapshot parseThesis(String raw) {
+        String clean = raw == null ? "" : raw.trim().replace("```json", "").replace("```", "").trim();
+        try {
+            JsonNode root = objectMapper.readTree(clean);
+            List<String> bull = new ArrayList<>();
+            root.path("bullCase").forEach(node -> bull.add(node.asText()));
+            List<String> bear = new ArrayList<>();
+            root.path("bearCase").forEach(node -> bear.add(node.asText()));
+            return new ThesisSnapshot(root.path("sentiment").asText("NEUTRAL").toUpperCase(),
+                    root.path("confidence").asInt(50), root.path("executiveSummary").asText("Analysis unavailable."),
+                    bull, bear, root.path("keyRisk").asText("Market volatility."),
+                    root.path("catalyst").asText("General market conditions."));
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid thesis response", e);
+        }
     }
 
     private ThesisSnapshot fallbackThesis(String ticker) {
