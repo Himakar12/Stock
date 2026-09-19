@@ -2,6 +2,8 @@ package com.example.stock.servive;
 
 import com.example.stock.dto.MarketDataResult;
 import com.example.stock.dto.TrendingStockDto;
+import com.example.stock.entity.WatchlistStock;
+import com.example.stock.repository.WatchlistStockRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -22,7 +24,7 @@ public class TrendingStocksService {
     private final MarketDataService marketDataService;
     private final OpenRouterService openRouterService;
     private final ObjectMapper objectMapper;
-    private final WatchlistService watchlistService;
+    private final WatchlistStockRepository watchlistRepository;
 
     private final Map<String, QuickSnapshot> quickCache = new ConcurrentHashMap<>();
     private final Map<String, RangeSnapshot> rangeCache = new ConcurrentHashMap<>();
@@ -42,7 +44,8 @@ public class TrendingStocksService {
 
     @Scheduled(fixedRate = 60_000, initialDelay = 60_000)
     public void refreshQuickData() {
-        for (String ticker : configuredTickers()) {
+        for (WatchlistStock stock : configuredStocks()) {
+            String ticker = stock.getYahooSymbol();
             try {
                 MarketDataResult result = marketDataService.fetchMarketData(ticker);
                 quickCache.put(ticker, new QuickSnapshot(result.getLatestData().getClose(),
@@ -55,7 +58,8 @@ public class TrendingStocksService {
 
     @Scheduled(fixedRate = 30 * 60_000, initialDelay = 90_000)
     public void refreshRangeAndThesis() {
-        for (String ticker : configuredTickers()) {
+        for (WatchlistStock stock : configuredStocks()) {
+            String ticker = stock.getYahooSymbol();
             try {
                 double[] range = marketDataService.fetch52WeekRange(ticker);
                 rangeCache.put(ticker, new RangeSnapshot(range[0], range[1]));
@@ -76,13 +80,14 @@ public class TrendingStocksService {
 
     public List<TrendingStockDto> getTrendingStocks() {
         List<TrendingStockDto> output = new ArrayList<>();
-        for (String ticker : configuredTickers()) {
+        for (WatchlistStock stock : configuredStocks()) {
+            String ticker = stock.getYahooSymbol();
             QuickSnapshot quick = quickCache.get(ticker);
             if (quick == null) continue;
             RangeSnapshot range = rangeCache.getOrDefault(ticker, new RangeSnapshot(0, 0));
             ThesisSnapshot thesis = thesisCache.getOrDefault(ticker, fallbackThesis(ticker));
             output.add(TrendingStockDto.builder()
-                    .symbol(ticker).name(ticker).price(quick.price())
+                    .symbol(ticker).name(stock.getDisplayName()).price(quick.price())
                     .high52(range.high52()).low52(range.low52()).change3Mo(quick.change3Mo())
                     .volume(quick.volume()).sentiment(thesis.sentiment()).confidence(thesis.confidence())
                     .executiveSummary(thesis.executiveSummary()).bullCase(thesis.bullCase())
@@ -91,9 +96,8 @@ public class TrendingStocksService {
         return output;
     }
 
-    private List<String> configuredTickers() {
-        return watchlistService.getStocks(DEFAULT_USER_ID).stream()
-                .map(item -> item.getYahooSymbol()).limit(5).toList();
+    private List<WatchlistStock> configuredStocks() {
+        return watchlistRepository.findTop5ByUserIdOrderByCreatedAtAsc(DEFAULT_USER_ID);
     }
 
     private ThesisSnapshot parseThesis(String raw) {
