@@ -3,6 +3,7 @@ package com.example.stock.controller;
 import com.example.stock.dto.WatchlistCreateRequest;
 import com.example.stock.dto.WatchlistStockDto;
 import com.example.stock.servive.WatchlistService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -25,7 +26,7 @@ public class WatchlistController {
     @PostMapping
     public ResponseEntity<WatchlistStockDto> addStock(
             @RequestParam(value = "userId", defaultValue = "1") Long userId,
-            @RequestBody WatchlistCreateRequest request) {
+            @Valid @RequestBody WatchlistCreateRequest request) {
         return ResponseEntity.status(201).body(watchlistService.addStock(userId, request.getTicker()));
     }
 
